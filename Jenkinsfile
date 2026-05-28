@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    tools {
+        jdk 'java-21'
+    }
+
     environment {
         APP_NAME      = 'wildfly-testapp'
         WAR_FILE      = "target/${APP_NAME}.war"
