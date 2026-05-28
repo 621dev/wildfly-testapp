@@ -6,15 +6,12 @@ pipeline {
     }
 
     environment {
-        APP_NAME      = 'wildfly-testapp'
-        WAR_FILE      = "target/${APP_NAME}.war"
-        DEPLOY_DIR    = '/opt/wildfly/standalone/deployments'
-        WILDFLY_USER  = 'wildflyadm'                         // WildFly 서버 SSH 계정
+        APP_NAME     = 'wildfly-testapp'
+        WAR_FILE     = "target/${APP_NAME}.war"
+        DEPLOY_DIR   = '/opt/wildfly/standalone/deployments'
+        WILDFLY_USER = 'wildflyadm'
     }
 
-    // Jenkins Credentials에 등록한 SSH Private Key ID 목록
-    // Manage Jenkins > Credentials 에서 'SSH Username with private key' 타입으로 등록
-    // 서버 IP는 실제 WildFly 서버 IP로 변경
     parameters {
         string(name: 'WAS_SERVERS', defaultValue: '10.10.20.2,10.10.20.3', description: 'WildFly 서버 IP (쉼표 구분)')
     }
@@ -23,7 +20,6 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                // GitHub 저장소에서 소스 체크아웃 (SCM 설정에서 자동 처리)
                 checkout scm
                 echo "브랜치: ${env.BRANCH_NAME ?: 'main'}"
             }
@@ -39,51 +35,44 @@ pipeline {
 
         stage('Rolling Deploy') {
             steps {
-                script {
-                    def servers = params.WAS_SERVERS.split(',').collect { it.trim() }
-                    echo "배포 대상 서버: ${servers}"
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: 'wildfly-ssh-key',
+                    keyFileVariable: 'SSH_KEY',
+                    usernameVariable: 'SSH_USER'
+                )]) {
+                    script {
+                        def servers = params.WAS_SERVERS.split(',').collect { it.trim() }
+                        echo "배포 대상 서버: ${servers}"
 
-                    for (server in servers) {
-                        echo "===== [${server}] 배포 시작 ====="
+                        for (server in servers) {
+                            echo "===== [${server}] 배포 시작 ====="
 
-                        // 1) 기존 WAR 제거 (언디플로이 트리거)
-                        sshCommand(
-                            remote: buildRemote(server),
-                            command: "rm -f ${DEPLOY_DIR}/${APP_NAME}.war ${DEPLOY_DIR}/${APP_NAME}.war.deployed"
-                        )
-
-                        // 2) 언디플로이 완료 대기
-                        sshCommand(
-                            remote: buildRemote(server),
-                            command: """
-                                for i in \$(seq 1 30); do
-                                    [ -f ${DEPLOY_DIR}/${APP_NAME}.war.undeployed ] && echo 'undeployed' && break
-                                    sleep 2
-                                done
+                            // 1) 기존 WAR 제거
+                            sh """
+                                ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${SSH_USER}@${server} \
+                                'rm -f ${DEPLOY_DIR}/${APP_NAME}.war ${DEPLOY_DIR}/${APP_NAME}.war.deployed'
                             """
-                        )
 
-                        // 3) 새 WAR 업로드
-                        sshPut(
-                            remote: buildRemote(server),
-                            from: "${WAR_FILE}",
-                            into: "${DEPLOY_DIR}/"
-                        )
-
-                        // 4) 배포 완료 대기 (최대 60초)
-                        sshCommand(
-                            remote: buildRemote(server),
-                            command: """
-                                for i in \$(seq 1 30); do
-                                    [ -f ${DEPLOY_DIR}/${APP_NAME}.war.deployed ] && echo '[${server}] 배포 성공' && break
-                                    [ -f ${DEPLOY_DIR}/${APP_NAME}.war.failed ]   && echo '[${server}] 배포 실패!' && exit 1
-                                    sleep 2
-                                done
-                                [ -f ${DEPLOY_DIR}/${APP_NAME}.war.deployed ] || (echo '배포 타임아웃' && exit 1)
+                            // 2) 새 WAR 업로드
+                            sh """
+                                scp -i ${SSH_KEY} -o StrictHostKeyChecking=no \
+                                ${WAR_FILE} ${SSH_USER}@${server}:${DEPLOY_DIR}/
                             """
-                        )
 
-                        echo "===== [${server}] 배포 완료 ====="
+                            // 3) 배포 완료 대기 (최대 60초)
+                            sh """
+                                ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${SSH_USER}@${server} '
+                                    for i in \$(seq 1 30); do
+                                        [ -f ${DEPLOY_DIR}/${APP_NAME}.war.deployed ] && echo "[${server}] 배포 성공" && exit 0
+                                        [ -f ${DEPLOY_DIR}/${APP_NAME}.war.failed ]   && echo "[${server}] 배포 실패!" && exit 1
+                                        sleep 2
+                                    done
+                                    echo "배포 타임아웃" && exit 1
+                                '
+                            """
+
+                            echo "===== [${server}] 배포 완료 ====="
+                        }
                     }
                 }
             }
@@ -94,7 +83,6 @@ pipeline {
                 script {
                     def servers = params.WAS_SERVERS.split(',').collect { it.trim() }
                     for (server in servers) {
-                        // 8080 포트로 헬스체크 (컨텍스트 경로는 프로젝트에 맞게 조정)
                         def url = "http://${server}:8080/${APP_NAME}/test.jsp"
                         def status = sh(
                             script: "curl -s -o /dev/null -w '%{http_code}' --max-time 10 '${url}'",
@@ -118,16 +106,4 @@ pipeline {
             echo "배포 실패 — Jenkins 로그를 확인하세요."
         }
     }
-}
-
-// SSH 접속 정보 객체 생성 헬퍼
-// Jenkins Credentials에 'wildfly-ssh-key' ID로 SSH 키를 등록해야 합니다
-def buildRemote(String host) {
-    return [
-        name        : host,
-        host        : host,
-        user        : env.WILDFLY_USER,
-        credentialsId: 'wildfly-ssh-key',   // Jenkins Credentials ID
-        allowAnyHosts: true
-    ]
 }
