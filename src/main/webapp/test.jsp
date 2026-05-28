@@ -73,16 +73,27 @@
                     }
                     try (Connection conn = ds.getConnection()) {
                         conn.setReadOnly(false);
-                        try (PreparedStatement ps = conn.prepareStatement("INSERT INTO testDB.members (name) VALUES (?)")) {
+                        try (PreparedStatement ps = conn.prepareStatement(
+                                "INSERT INTO testDB.members (name) VALUES (?)",
+                                PreparedStatement.RETURN_GENERATED_KEYS)) {
                             ps.setString(1, trimmedName);
                             ps.executeUpdate();
-                            session.setAttribute("message", "'" + trimmedName + "' 저장 성공!");
+                            ResultSet generatedKeys = ps.getGeneratedKeys();
+                            if (generatedKeys.next()) {
+                                int newId = generatedKeys.getInt(1);
+                                response.setContentType("application/json; charset=UTF-8");
+                                out.print("{\"id\":" + newId + ",\"name\":\"" + trimmedName.replace("\"", "\\\"") + "\"}");
+                                return;
+                            }
                         }
                     }
                 }
             }
         } catch (Exception e) {
-            session.setAttribute("message", "에러: " + e.getMessage());
+            response.setContentType("application/json; charset=UTF-8");
+            response.setStatus(500);
+            out.print("{\"error\":\"" + e.getMessage().replace("\"", "\\\"") + "\"}");
+            return;
         }
         response.sendRedirect(request.getContextPath() + "/test.jsp");
         return;
@@ -634,7 +645,7 @@
             <!-- 좌측 등록 폼 카드 -->
             <div class="card-box form-box">
                 <h3>신규 데이터 등록</h3>
-                <form method="post" action="test.jsp">
+                <form id="insert-form" onsubmit="insertRow(event)">
                     <input type="hidden" name="action" value="insert" />
                     <div class="form-group">
                         <label for="input-name">이름</label>
@@ -667,16 +678,12 @@
                                         <td style="font-weight: 600; color: var(--text-secondary);"><%= m[0] %></td>
                                         <td style="font-weight: 500;"><%= escapeHtml((String)m[1]) %></td>
                                         <td style="text-align: center;">
-                                            <form method="post" action="test.jsp" style="margin: 0; display: inline;">
-                                                <input type="hidden" name="action" value="delete" />
-                                                <input type="hidden" name="id" value="<%= m[0] %>" />
-                                                <button type="submit" class="btn-delete" title="데이터 삭제">
-                                                    <!-- Trash Can SVG Icon -->
-                                                    <svg xmlns="http://www.w3.org/2000/svg" class="icon-trash" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                    </svg>
-                                                </button>
-                                            </form>
+                                            <button type="button" class="btn-delete" title="데이터 삭제"
+                                                onclick="deleteRow(this, '<%= m[0] %>')">
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="icon-trash" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                </svg>
+                                            </button>
                                         </td>
                                     </tr>
                                 <% } %>
@@ -688,5 +695,75 @@
         </div>
     </div>
 
+<script>
+    function insertRow(e) {
+        e.preventDefault();
+        const form = document.getElementById('insert-form');
+        const nameInput = document.getElementById('input-name');
+        const name = nameInput.value.trim();
+        if (!name) return;
+
+        const formData = new FormData(form);
+        const btn = form.querySelector('button[type=submit]');
+        btn.disabled = true;
+
+        fetch('test.jsp', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    alert('오류: ' + data.error);
+                    return;
+                }
+                const tbody = document.querySelector('table tbody');
+                const noData = tbody.querySelector('.no-data');
+                if (noData) noData.closest('tr').remove();
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="font-weight:600;color:var(--text-secondary);">${data.id}</td>
+                    <td style="font-weight:500;">${escapeHtml(data.name)}</td>
+                    <td style="text-align:center;">
+                        <button type="button" class="btn-delete" title="데이터 삭제"
+                            onclick="deleteRow(this, '${data.id}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="icon-trash" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"
+                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                        </button>
+                    </td>`;
+                tbody.insertBefore(tr, tbody.firstChild);
+                nameInput.value = '';
+            })
+            .catch(() => alert('통신 오류'))
+            .finally(() => { btn.disabled = false; });
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                  .replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+    }
+
+    function deleteRow(btn, id) {
+        const formData = new FormData();
+        formData.append('action', 'delete');
+        formData.append('id', id);
+
+        btn.disabled = true;
+
+        fetch('test.jsp', { method: 'POST', body: formData })
+            .then(res => {
+                if (res.ok) {
+                    btn.closest('tr').remove();
+                } else {
+                    alert('삭제 실패');
+                    btn.disabled = false;
+                }
+            })
+            .catch(() => {
+                alert('통신 오류');
+                btn.disabled = false;
+            });
+    }
+</script>
 </body>
 </html>
