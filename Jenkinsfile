@@ -47,10 +47,10 @@ pipeline {
                         for (server in servers) {
                             echo "===== [${server}] 배포 시작 ====="
 
-                            // 1) 기존 WAR 제거
+                            // 1) 기존 WAR 제거 및 Undeploy 대기 (3초)
                             sh """
                                 ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${SSH_USER}@${server} \
-                                'rm -f ${DEPLOY_DIR}/${APP_NAME}.war ${DEPLOY_DIR}/${APP_NAME}.war.deployed'
+                                'rm -f ${DEPLOY_DIR}/${APP_NAME}.war ${DEPLOY_DIR}/${APP_NAME}.war.deployed && sleep 3'
                             """
 
                             // 2) 새 WAR 업로드

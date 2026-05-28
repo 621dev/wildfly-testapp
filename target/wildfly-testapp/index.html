@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WildFly Maven Test Application</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #00768f;
+            --primary-dark: #005a6e;
+            --secondary: #e21c34;
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(to right, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.05em;
+        }
+
+        header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            font-weight: 300;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            padding: 2.5rem;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            color: #38bdf8;
+            font-weight: 600;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+
+        @media (min-width: 768px) {
+            .info-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        .step-box {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 16px;
+            padding: 1.5rem;
+            transition: background 0.2s ease;
+        }
+
+        .step-box:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .step-num {
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            width: 28px;
+            height: 28px;
+            background: #818cf8;
+            color: #0f172a;
+            font-weight: 800;
+            border-radius: 50%;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .step-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .step-desc {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .action-area {
+            text-align: center;
+            margin-top: 1rem;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.8rem 2rem;
+            background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+            color: #0f172a;
+            font-weight: 600;
+            text-decoration: none;
+            border-radius: 30px;
+            box-shadow: 0 4px 15px rgba(56, 189, 248, 0.3);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .btn:hover {
+            transform: scale(1.03);
+            box-shadow: 0 6px 20px rgba(56, 189, 248, 0.4);
+        }
+
+        code {
+            font-family: 'Courier New', Courier, monospace;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            color: #f472b6;
+            font-size: 0.85em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>WildFly Maven Application</h1>
+            <p>Jakarta EE 10 • Java 17 • Maven Setup Complete</p>
+        </header>
+
+        <div class="card">
+            <h2>프로젝트 뼈대 생성 완료</h2>
+            <p style="color: var(--text-secondary); line-height: 1.7; margin-bottom: 2rem;">
+                현재 리포지터리 내에 표준 Maven 프로젝트의 폴더 구조와 WildFly 및 Jakarta EE 10 기반의 애플리케이션 개발에 필요한 <code>pom.xml</code>, <code>web.xml</code>, <code>beans.xml</code> 및 기본 <code>Servlet</code> 코드가 모두 자동으로 생성되었습니다.
+            </p>
+
+            <div class="info-grid">
+                <div class="step-box">
+                    <span class="step-num">1</span>
+                    <h3 class="step-title">Maven 설치</h3>
+                    <p class="step-desc">
+                        시스템에 Maven이 설치되어 있어야 합니다. CLI 혹은 IDE(IntelliJ, Eclipse, VS Code 등)에 내장된 Maven을 이용할 수도 있습니다.
+                    </p>
+                </div>
+
+                <div class="step-box">
+                    <span class="step-num">2</span>
+                    <h3 class="step-title">서버 연결 & 배포</h3>
+                    <p class="step-desc">
+                        WildFly 서버가 구동 중인 상태에서 <code>mvn wildfly:deploy</code> 명령어를 실행하면, 작성한 웹 애플리케이션이 자동으로 빌드 및 배포됩니다.
+                    </p>
+                </div>
+            </div>
+
+            <div class="action-area" style="margin-top: 2.5rem;">
+                <a href="hello" class="btn" target="_blank">Hello 서블릿 테스트 이동</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
