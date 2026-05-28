@@ -6,9 +6,6 @@
 <%@ page contentType="text/html; charset=UTF-8" %>
 
 <%!
-    // Java 17 Record를 사용한 깔끔한 DTO 정의
-    public record Member(int id, String name) {}
-
     // XSS 방지를 위한 HTML 이스케이프 헬퍼 메서드
     String escapeHtml(String input) {
         if (input == null) return "";
@@ -92,7 +89,7 @@
     }
 
     // 2. GET 요청 처리 (단일 데이터 통합 수집 및 각 노드별 헬스체크 수행)
-    List<Member> memberList = new ArrayList<>();
+    List<Object[]> memberList = new ArrayList<>();
     String dbError = null;
     
     boolean masterOk = false;
@@ -110,7 +107,7 @@
             try (Statement stmt = conn.createStatement();
                  ResultSet rs = stmt.executeQuery("SELECT * FROM testDB.members ORDER BY id DESC")) {
                 while (rs.next()) {
-                    memberList.add(new Member(rs.getInt("id"), rs.getString("name")));
+                    memberList.add(new Object[]{rs.getInt("id"), rs.getString("name")});
                 }
                 masterOk = true;
                 masterMsg = "연결 성공 (Read/Write 가능)";
@@ -665,14 +662,14 @@
                                     <td colspan="3" class="no-data">등록된 데이터가 존재하지 않습니다.</td>
                                 </tr>
                             <% } else { %>
-                                <% for (Member m : memberList) { %>
+                                <% for (Object[] m : memberList) { %>
                                     <tr>
-                                        <td style="font-weight: 600; color: var(--text-secondary);"><%= m.id() %></td>
-                                        <td style="font-weight: 500;"><%= escapeHtml(m.name()) %></td>
+                                        <td style="font-weight: 600; color: var(--text-secondary);"><%= m[0] %></td>
+                                        <td style="font-weight: 500;"><%= escapeHtml((String)m[1]) %></td>
                                         <td style="text-align: center;">
                                             <form method="post" action="test.jsp" style="margin: 0; display: inline;">
                                                 <input type="hidden" name="action" value="delete" />
-                                                <input type="hidden" name="id" value="<%= m.id() %>" />
+                                                <input type="hidden" name="id" value="<%= m[0] %>" />
                                                 <button type="submit" class="btn-delete" title="데이터 삭제">
                                                     <!-- Trash Can SVG Icon -->
                                                     <svg xmlns="http://www.w3.org/2000/svg" class="icon-trash" fill="none" viewBox="0 0 24 24" stroke="currentColor">
