@@ -5,6 +5,12 @@ pipeline {
         jdk 'java-21'
     }
 
+    triggers {
+        // 5분마다 Git 변경 사항 체크 및 GitHub 웹훅 트리거 활성화
+        pollSCM('H/5 * * * *')
+        githubPush()
+    }
+
     environment {
         APP_NAME     = 'wildfly-testapp'
         WAR_FILE     = "target/${APP_NAME}.war"
