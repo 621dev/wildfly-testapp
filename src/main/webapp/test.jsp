@@ -115,34 +115,54 @@
         Context ctx = new InitialContext();
         DataSource ds = (DataSource) ctx.lookup("java:/MariaDBDS");
 
-        // [A] Master DB 연결성 테스트 및 데이터 로드
+        // [A] Active DB 연결성 테스트, 실제 접속 서버 정보 조회 및 데이터 로드
+        String activeHostname = "알 수 없음";
         try (Connection conn = ds.getConnection()) {
             conn.setReadOnly(false); // 읽기/쓰기 커넥션 명시
+            
+            // 1. 실제 접속된 물리 DB 호스트 조회 (Failover 확인용)
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT @@hostname")) {
+                if (rs.next()) {
+                    activeHostname = rs.getString(1);
+                }
+            }
+            
+            // 2. 데이터 로드
             try (Statement stmt = conn.createStatement();
                  ResultSet rs = stmt.executeQuery("SELECT * FROM testDB.members ORDER BY id DESC")) {
                 while (rs.next()) {
                     memberList.add(new Object[]{rs.getInt("id"), rs.getString("name")});
                 }
                 masterOk = true;
-                masterMsg = "연결 성공 (Read/Write 가능)";
+                masterMsg = "접속 물리 노드: " + activeHostname;
             }
+            
+            // 3. 마스터 DB 입장에서 복제 세션(SHOW SLAVE HOSTS)을 통한 슬레이브 헬스체크
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SHOW SLAVE HOSTS")) {
+                List<String> connectedSlaves = new ArrayList<>();
+                while (rs.next()) {
+                    connectedSlaves.add(rs.getString("Host") + ":" + rs.getString("Port"));
+                }
+                if (!connectedSlaves.isEmpty()) {
+                    slaveOk = true;
+                    slaveMsg = "복제 연결됨 (노드 목록: " + String.join(", ", connectedSlaves) + ")";
+                } else {
+                    slaveOk = false;
+                    slaveMsg = "복제 중단됨 (연결된 슬레이브 없음)";
+                }
+            } catch (Exception e) {
+                // SHOW SLAVE HOSTS 권한이 없거나 지원하지 않는 경우 예외처리
+                slaveOk = false;
+                slaveMsg = "복제 상태 확인 실패 (SHOW SLAVE HOSTS 실행 불가)";
+            }
+            
         } catch (Exception e) {
             masterMsg = "연결 실패: " + e.getMessage();
+            slaveMsg = "마스터 연결 실패로 인해 복제 상태 확인 불가";
         }
 
-        // [B] Slave DB 연결성 테스트 (Read Only 세션 생성 후 단일 Ping 쿼리 수행)
-        try (Connection conn = ds.getConnection()) {
-            conn.setReadOnly(true); // 읽기 전용 커넥션 설정 (슬레이브 라우팅 지시)
-            try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT 1")) {
-                if (rs.next()) {
-                    slaveOk = true;
-                    slaveMsg = "연결 성공 (Read Only)";
-                }
-            }
-        } catch (Exception e) {
-            slaveMsg = "연결 실패: " + e.getMessage();
-        }
     } catch (Exception e) {
         dbError = e.getMessage();
     }
@@ -606,7 +626,7 @@
                 <div class="status-desc">현재 어플리케이션이 구동 중인 WAS IP</div>
             </div>
 
-            <!-- Master DB Connection -->
+            <!-- Active DB Connection -->
             <div class="status-card master">
                 <div class="card-header">
                     <div class="card-header-left">
@@ -614,7 +634,7 @@
                         <svg xmlns="http://www.w3.org/2000/svg" class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
                         </svg>
-                        <span class="card-title">Master DB (10.10.20.4)</span>
+                        <span class="card-title">Active DB Node (VIP)</span>
                     </div>
                     <span class="status-badge <%= masterOk ? "ok" : "fail" %>">
                         <span class="pulse-dot"></span> <%= masterOk ? "Online" : "Offline" %>
@@ -624,7 +644,7 @@
                 <div class="status-desc"><%= escapeHtml(masterMsg) %></div>
             </div>
 
-            <!-- Slave DB Connection -->
+            <!-- Slave DB Replication State -->
             <div class="status-card slave">
                 <div class="card-header">
                     <div class="card-header-left">
@@ -632,13 +652,13 @@
                         <svg xmlns="http://www.w3.org/2000/svg" class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.5M4 4h4.5M4 9a9 9 0 0113.687-3.687" />
                         </svg>
-                        <span class="card-title">Slave DB (10.10.20.5)</span>
+                        <span class="card-title">Replication State (Slave)</span>
                     </div>
                     <span class="status-badge <%= slaveOk ? "ok" : "fail" %>">
-                        <span class="pulse-dot"></span> <%= slaveOk ? "Online" : "Offline" %>
+                        <span class="pulse-dot"></span> <%= slaveOk ? "Active" : "Inactive" %>
                     </span>
                 </div>
-                <div class="status-value"><%= slaveOk ? "연결 완료" : "연결 유실" %></div>
+                <div class="status-value"><%= slaveOk ? "복제 정상" : "복제 이상" %></div>
                 <div class="status-desc"><%= escapeHtml(slaveMsg) %></div>
             </div>
         </div>
