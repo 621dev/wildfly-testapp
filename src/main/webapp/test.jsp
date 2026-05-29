@@ -117,6 +117,7 @@
 
         // [A] Active DB 연결성 테스트, 실제 접속 서버 정보 조회 및 데이터 로드
         String activeHostname = "알 수 없음";
+        String activeIp = "알 수 없음";
         try (Connection conn = ds.getConnection()) {
             conn.setReadOnly(false); // 읽기/쓰기 커넥션 명시
             
@@ -128,14 +129,39 @@
                 }
             }
             
-            // 2. 데이터 로드
+            // 2. JDBC Connection 메타데이터로부터 실제 소켓 연결 IP 파싱 추출
+            try {
+                String url = conn.getMetaData().getURL();
+                if (url != null && url.contains("//")) {
+                    String temp = url.substring(url.indexOf("//") + 2);
+                    if (temp.contains("/")) {
+                        temp = temp.substring(0, temp.indexOf("/"));
+                    }
+                    if (temp.contains(":")) {
+                        temp = temp.substring(0, temp.indexOf(":"));
+                    }
+                    if (temp.contains(",")) {
+                        temp = temp.split(",")[0];
+                    }
+                    activeIp = temp;
+                }
+            } catch (Exception e) {
+                // DNS 쿼리를 통한 IP 역추적 보완
+                try {
+                    activeIp = java.net.InetAddress.getByName(activeHostname).getHostAddress();
+                } catch (Exception ex) {
+                    activeIp = "조회 실패";
+                }
+            }
+            
+            // 3. 데이터 로드
             try (Statement stmt = conn.createStatement();
                  ResultSet rs = stmt.executeQuery("SELECT * FROM testDB.members ORDER BY id DESC")) {
                 while (rs.next()) {
                     memberList.add(new Object[]{rs.getInt("id"), rs.getString("name")});
                 }
                 masterOk = true;
-                masterMsg = "접속 물리 노드: " + activeHostname;
+                masterMsg = "접속 물리 노드: " + activeHostname + " (" + activeIp + ")";
             }
             
             // 3. 마스터 DB 입장에서 복제 세션(SHOW SLAVE HOSTS)을 통한 슬레이브 헬스체크
