@@ -259,155 +259,24 @@ ssh root@10.10.20.5 "hostname"
 
 ---
 
-## 5. [Step 4] Orchestrator Raft 클러스터 및 SSL 암호화 접속 활성화
+## 5. [Step 4] 복제 관리 솔루션 (Orchestrator) 셋업 및 연동
 
-단일 장애점을 극복하고, Go 언어로 빌드된 Orchestrator의 커넥션 안정성 확보를 위해 **DB 서버의 SSL 접속을 정식 활성화하고, 오케스트레이터의 DB 감시 접속 시 SSL 접속 규격을 매핑**합니다.
+Orchestrator는 분산 환경에서 복제 토폴로지를 감시하고 수동/자동 스위칭(Failover/Failback)을 무인으로 제어하는 복제 합의체 핵심 모듈입니다. 
 
-### 5.1 MariaDB SSL/TLS 보안 접속 기상 및 활성화 (양쪽 DB 공통)
-1. **사설 SSL 인증서 세트 자동 생성 및 권한 설정**:
-   ```bash
-   mkdir -p /etc/mysql/ssl
-   openssl req -newkey rsa:2048 -days 3650 -nodes -x509 \
-     -keyout /etc/mysql/ssl/server.key \
-     -out /etc/mysql/ssl/server.crt \
-     -subj "/CN=mariadb-server-ha"
-   chown -R mysql:mysql /etc/mysql/ssl
-   chmod 600 /etc/mysql/ssl/server.key
-   chmod 644 /etc/mysql/ssl/server.crt
-   ```
-2. **MariaDB 설정 주입 (`/etc/my.cnf.d/server.cnf` [mariadb] 또는 [mysqld] 아래 추가)**:
-   * **마스터 DB (`db1.local`)**:
-     ```ini
-     [mariadb]
-     ssl-cert=/etc/mysql/ssl/server.crt
-     ssl-key=/etc/mysql/ssl/server.key
-     report-host=db1.local
-     ```
-   * **슬레이브 DB (`db2.local`)**:
-     ```ini
-     [mariadb]
-     ssl-cert=/etc/mysql/ssl/server.crt
-     ssl-key=/etc/mysql/ssl/server.key
-     report-host=db2.local
-     ```
-   *(설정 적용 후 `systemctl restart mariadb` 실행하여 `have_ssl=YES` 확인)*
+실무적인 관리의 편의성과 설계서 가독성 보장을 위해, 오케스트레이터의 세부 설치, 사설 SSL 암호화 접속 활성화, 2트랙 설정 분리/병합(`orchestrator-custom.json`), systemd 튜닝 및 Raft 클러스터 리셋법 등 모든 디테일한 기술 명세는 **별도의 단독 기술 문서로 완벽히 모듈화(분리)** 하였습니다.
 
-### 5.2 Orchestrator 설치 및 환경 준비 (WAS 1, WAS 2 공통)
-```bash
-# 공식 패키지 다운로드 및 로컬 인스톨
-curl -L -O https://github.com/openark/orchestrator/releases/download/v3.2.6/orchestrator-3.2.6-1.x86_64.rpm
-dnf localinstall -y orchestrator-3.2.6-1.x86_64.rpm
+> [!IMPORTANT]
+> **Orchestrator 설치 및 설정 구축 상세 가이드라인**
+> * 오케스트레이터의 설치, Raft 합의 클러스터 구성, 그리고 SSL 연동 및 트러블슈팅의 전체 정석 과정은 반드시 아래의 격리 문서를 100% 참조하여 구축을 선행 완료하십시오:
+> * ➡️ **[Orchestrator Raft 합의 클러스터 설치 및 정석 구축 가이드](file:///c:/Users/user/Project/wildfly-testapp/docs/orchestrator_setup_guide.md)**
 
-# 실행 및 클라이언트 심볼릭 링크 정밀 정의
-ln -sf /usr/local/orchestrator/orchestrator /usr/bin/orchestrator
-ln -sf /usr/local/orchestrator/resources/bin/orchestrator-client /usr/bin/orchestrator-client
-
-# 권한 전용 그룹 및 유저 생성 및 데이터 디렉토리 소유권 부여
-groupadd -r orchestrator || true
-useradd -r -g orchestrator -s /sbin/nologin orchestrator || true
-chown -R orchestrator:orchestrator /var/lib/orchestrator
-```
-
-### 5.3 SSL 연동 및 Raft 이중화 설정 파일 구성 (`/etc/orchestrator.conf.json`)
-임시 우회 패러미터(`tls=false`, `MySQLTopologyUseSSL=false`)를 철저히 걷어내고, **MariaDB 기상 SSL 인증서를 타는 암호화 접속 보안 규격(`tls=preferred`, `MySQLTopologyUseSSL=true`)으로 정석 매핑**합니다.
-
-**1) WAS 1번 서버 (`10.10.20.2`) 설정**:
-```json
-{
-  "Debug": true,
-  "EnableSyslog": false,
-  "ListenAddress": ":3000",
-  "BackendDB": "sqlite3",
-  "SQLite3DataFile": "/var/lib/orchestrator/orchestrator.db",
-  
-  // --- 실무 정석: SSL/TLS 활성화 감시 접속 설정 ---
-  "MySQLTopologyUser": "orc_user",
-  "MySQLTopologyPassword": "orc_password",
-  "MySQLTopologyParams": "tls=preferred",
-  "MySQLTopologyUseSSL": true,
-  "MySQLTopologyRequireSSL": false,
-  "MySQLTopologySSLSkipVerify": true,
-  
-  "DatabaseGrowlOnError": true,
-  "DiscoverByShowSlaveHosts": true,
-  "RecoveryPeriodBlockSeconds": 3600,
-  "RecoverMasterClusterFilters": [
-    "mariadb_cluster"
-  ],
-  "ApplyMySQLPromotionAfterMasterFailover": true,
-  
-  // --- Raft 합의 클러스터 설정 ---
-  "RaftEnabled": true,
-  "RaftDataDir": "/var/lib/orchestrator",
-  "RaftBind": "10.10.20.2:10008",
-  "RaftAdvertise": "10.10.20.2",
-  "RaftNodes": [
-    "10.10.20.2",
-    "10.10.20.3"
-  ],
-  
-  // Graceful Takeover(수동 원복/Failback) 직후 호출될 오토메이션 스크립트 연결
-  "PostGracefulTakeoverProcesses": [
-    "/opt/db_scripts/failback_gtid.sh"
-  ]
-}
-```
-
-**2) WAS 2번 서버 (`10.10.20.3`) 설정**:
-```json
-{
-  "Debug": true,
-  "EnableSyslog": false,
-  "ListenAddress": ":3000",
-  "BackendDB": "sqlite3",
-  "SQLite3DataFile": "/var/lib/orchestrator/orchestrator.db",
-  
-  "MySQLTopologyUser": "orc_user",
-  "MySQLTopologyPassword": "orc_password",
-  "MySQLTopologyParams": "tls=preferred",
-  "MySQLTopologyUseSSL": true,
-  "MySQLTopologyRequireSSL": false,
-  "MySQLTopologySSLSkipVerify": true,
-  
-  "DatabaseGrowlOnError": true,
-  "DiscoverByShowSlaveHosts": true,
-  "RecoveryPeriodBlockSeconds": 3600,
-  "RecoverMasterClusterFilters": [
-    "mariadb_cluster"
-  ],
-  "ApplyMySQLPromotionAfterMasterFailover": true,
-  
-  "RaftEnabled": true,
-  "RaftDataDir": "/var/lib/orchestrator",
-  "RaftBind": "10.10.20.3:10008",
-  "RaftAdvertise": "10.10.20.3",
-  "RaftNodes": [
-    "10.10.20.2",
-    "10.10.20.3"
-  ],
-  
-  "PostGracefulTakeoverProcesses": [
-    "/opt/db_scripts/failback_gtid.sh"
-  ]
-}
-```
-> 설정 적용 후 데몬을 실행하고 활성화합니다: `systemctl start orchestrator && systemctl enable orchestrator`
-
-### 5.4 DB 서버 내 감시 전용 계정 및 FQDN 스캔 등록
+### 5.1 DB 서버 내 감시 전용 계정 생성 (마스터 DB에서 1회 실행)
+오케스트레이터가 양쪽 DB 서버(`db1.local`, `db2.local`)에 정식 보안 접속하여 복제 상태를 감시하고 제어할 수 있도록, 마스터 DB에서 감시 전용 시스템 계정을 정석 기상시킵니다. (복제를 통해 슬레이브에도 자동으로 권한이 전파됩니다.)
 ```sql
 -- 마스터 DB에 접속하여 모니터링 및 복구 명령어 제어권이 부여된 계정 생성
 CREATE USER 'orc_user'@'%' IDENTIFIED BY 'orc_password';
 GRANT SUPER, PROCESS, REPLICATION SLAVE, RELOAD ON *.* TO 'orc_user'@'%';
 FLUSH PRIVILEGES;
-```
-
-오케스트레이터의 API 클라이언트를 통해 Raft 리더에게 스캔을 정석 요청합니다.
-```bash
-# 1. WAS 서버 내 API 프로파일 설정 등록
-echo 'api="http://127.0.0.1:3000/api"' > /etc/orchestrator-client.conf
-
-# 2. FQDN 도메인을 통한 토폴로지 등록 (Discover)
-orchestrator-client -c discover -i db1.local
 ```
 
 ---
@@ -430,8 +299,47 @@ DB_USER=root
 DB_PASS=1212
 ```
 
-### 6.2 실무 등급 자동 복구 스크립트 (`/opt/db_scripts/failback_gtid.sh`)
+### 6.2 자동 Failover 후처리 스크립트 (`/opt/db_scripts/failover_completed.sh`)
+오케스트레이터가 마스터의 급사를 감지하고 자동 장애 극복(Failover) 조치를 완료한 직후, 승격된 신규 마스터(슬레이브 노드)의 쓰기 잠금(`read_only`) 제한을 완전 무인 자동으로 즉시 해제해 주는 자동화 오토메이션 스크립트입니다.
+
 양쪽 WAS 서버의 `/opt/db_scripts/` 폴더 하위에 생성 후 `chmod +x` 실행 권한을 부여합니다.
+```bash
+#!/bin/bash
+# =========================================================================
+#  오케스트레이터 자동 Failover 완료 후처리 스크립트 (Production Level)
+# =========================================================================
+
+INI_FILE="/opt/db_scripts/db_config.ini"
+
+if [ ! -f "$INI_FILE" ]; then
+    echo "[$(date)] [오류] 설정 파일이 존재하지 않습니다: $INI_FILE" >> /var/log/orchestrator-recovery.log
+    exit 1
+fi
+
+# ini 파싱용 유틸리티 함수
+function get_ini_val() {
+    local file="$1"
+    local section="$2"
+    local key="$3"
+    sed -n "/^\[$section\]/,/^\[/p" "$file" | grep -E "^$key\s*=" | cut -d'=' -f2- | sed 's/^[ \t]*//;s/[ \t]*$//' | tr -d '\r'
+}
+
+SLAVE_IP=$(get_ini_val "$INI_FILE" "DB_CONFIG" "SLAVE_IP")
+DB_USER=$(get_ini_val "$INI_FILE" "DB_CONFIG" "DB_USER")
+DB_PASS=$(get_ini_val "$INI_FILE" "DB_CONFIG" "DB_PASS")
+
+MYSQL_CMD="mysql -u$DB_USER -p$DB_PASS -h"
+
+echo "[$(date)] [자동화] 신규 승격된 마스터(${SLAVE_IP})의 쓰기 제한 강제 해제..." >> /var/log/orchestrator-recovery.log
+
+# 오케스트레이터가 승격시킨 슬레이브의 read_only 락을 실시간 해제!
+$MYSQL_CMD $SLAVE_IP -e "SET GLOBAL read_only = 0;" >> /var/log/orchestrator-recovery.log 2>&1
+
+echo "[$(date)] [자동화] 완전 자동 Failover 및 락 해제 완수!" >> /var/log/orchestrator-recovery.log
+```
+
+### 6.3 실무 등급 자동 복원 스크립트 (`/opt/db_scripts/failback_gtid.sh`)
+원래 마스터가 기상했을 때 수동 원복(Takeover) 트리거 직후 호출되어 슬레이브의 데이터를 동기화하고 VIP를 정석 회귀시키는 원복 스크립트입니다. 양쪽 WAS의 동일 경로에 생성 후 실행 권한을 부여합니다.
 ```bash
 #!/bin/bash
 # =========================================================================
@@ -565,12 +473,12 @@ DB 장애로 VIP가 이관되거나 복원될 때, 자바 WAS(WildFly) 애플리
 
 구축 완료 후 정석 프로세스가 가동되는지 검증하기 위한 상세 시나리오입니다.
 
-### 8.1 마스터 DB 장애 극복 테스트 (자동 Failover 검증)
+### 8.1 마스터 DB 장애 극복 테스트 (100% 무인 자동 Failover 검증)
 1. **마스터 DB 중지**: `systemctl stop mariadb` (DB 1번)
-2. **검증 지표**:
-   * 약 3초 이내에 슬레이브 DB(`db2.local`)의 `ens36` 카드에 `10.10.20.21 VIP`가 기상하고 서비스 인계.
-   * Orchestrator 웹 대시보드(`http://192.168.0.169:3000`)에 마스터 장애가 빨간색으로 표기되고, 복제 고리가 일시 차단된 상태 모니터링 가능.
-   * 슬레이브 DB가 쓰기 잠금을 풀고 Active 상태로 전환 (`SET GLOBAL read_only = 0`).
+2. **검증 지표 (손가락 하나 대지 않고 3초간 대기)**:
+   * 약 3초 이내에 슬레이브 DB(`db2.local`)의 `ens36` 카드에 `10.10.20.21 VIP`가 기상하고 서비스 인계. (Keepalived 자동 이관 완료)
+   * Orchestrator 웹 대시보드(`http://192.168.0.169:3000`)에 마스터 장애가 포착되며, 슬레이브(`instance-4e7c`) 노드가 **독자적인 액티브 마스터(주황색/녹색 테두리)로 정식 승격 완료**.
+   * 오케스트레이터의 자동 복구 훅(`failover_completed.sh`)이 완전 무인 격발되어, 슬레이브 DB의 쓰기 잠금이 **자동으로 해제**됨 (`SHOW VARIABLES LIKE 'read_only';` 조회 시 **`OFF`** 상태 확인 완료!).
 
 ### 8.2 장애 중 누락 데이터 수혈 테스트 (GTID 데이터 생성)
 마스터가 죽어있는 동안, 서비스가 슬레이브 VIP로 유입되고 있음을 검증하기 위해 슬레이브 DB에 임시로 신규 데이터를 밀어 넣습니다.
