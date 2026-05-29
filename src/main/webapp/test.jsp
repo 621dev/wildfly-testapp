@@ -48,6 +48,7 @@
 
     // 1. POST 요청 처리 (마스터 서버에 쓰기/삭제 진행)
     if ("POST".equalsIgnoreCase(request.getMethod())) {
+        request.setCharacterEncoding("UTF-8");
         try {
             Context ctx = new InitialContext();
             DataSource ds = (DataSource) ctx.lookup("java:/MariaDBDS");
@@ -705,11 +706,11 @@
         const name = nameInput.value.trim();
         if (!name) return;
 
-        const formData = new FormData(form);
+        const params = new URLSearchParams(new FormData(form));
         const btn = form.querySelector('button[type=submit]');
         btn.disabled = true;
 
-        fetch('test.jsp', { method: 'POST', body: formData })
+        fetch('test.jsp', { method: 'POST', body: params })
             .then(res => res.json())
             .then(data => {
                 if (data.error) {
@@ -746,13 +747,13 @@
     }
 
     function deleteRow(btn, id) {
-        const formData = new FormData();
-        formData.append('action', 'delete');
-        formData.append('id', id);
+        const params = new URLSearchParams();
+        params.append('action', 'delete');
+        params.append('id', id);
 
         btn.disabled = true;
 
-        fetch('test.jsp', { method: 'POST', body: formData })
+        fetch('test.jsp', { method: 'POST', body: params })
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
